@@ -10,3 +10,4 @@ data/raw/gsm8k/
 data/caches/models/
 outputs/
 *.egg-info/
+CODEX_QWEN3_LID_EXPERIMENTS.md
