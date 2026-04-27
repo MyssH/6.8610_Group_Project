@@ -1,0 +1,7 @@
+experiment: exp_b
+n_samples: 100
+split: test
+output_dir: outputs/exp_b
+sampling_profile: official_recommended
+prompt_variants: [canonical, irrelevant_context, repetitive_filler]
+modes: [no_think]

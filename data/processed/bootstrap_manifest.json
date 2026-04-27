@@ -1,0 +1,12 @@
+{
+  "dataset_config": "main",
+  "dataset_name": "openai/gsm8k",
+  "dataset_path": "/Users/myssh/Desktop/NLP_Final/data/raw/gsm8k",
+  "dataset_splits": {
+    "test": 1319,
+    "train": 7473
+  },
+  "model_id": "Qwen/Qwen3-1.7B",
+  "model_path": "/Users/myssh/Desktop/NLP_Final/data/caches/models/Qwen--Qwen3-1.7B",
+  "timestamp": "2026-04-26T21:57:58.661946+00:00"
+}

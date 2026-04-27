@@ -1,0 +1,6 @@
+experiment: exp_a
+n_baseline: 30
+split: test
+output_dir: outputs/exp_a
+sampling_profile: official_recommended
+mode: no_think

@@ -1,0 +1,6 @@
+experiment: exp_c
+n_samples: 200
+split: test
+output_dir: outputs/exp_c
+sampling_profile: official_recommended
+modes: [think, no_think]
