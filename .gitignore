@@ -8,6 +8,7 @@ __pycache__/
 venv/
 data/raw/gsm8k/
 data/caches/models/
-outputs/
+output/*/hidden_states/
+*.npz
 *.egg-info/
 CODEX_QWEN3_LID_EXPERIMENTS.md

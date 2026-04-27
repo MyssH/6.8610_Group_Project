@@ -1,0 +1,85 @@
+{
+  "config": {
+    "batch_size": 16,
+    "dataset_config": "main",
+    "dataset_name": "openai/gsm8k",
+    "default_split": "test",
+    "experiment": "exp_c",
+    "k": 10,
+    "layers": [
+      6,
+      13,
+      20
+    ],
+    "max_thinking_tokens": 512,
+    "model_id": "Qwen/Qwen3-14B",
+    "modes": [
+      "think",
+      "no_think"
+    ],
+    "n_samples": 200,
+    "normalize_hidden_states": false,
+    "output_dir": "/content/NLP_Final/outputs/Qwen--Qwen3-14B/exp_c",
+    "sampling_profile": "official_recommended",
+    "sampling_profiles": {
+      "matched_main": {
+        "do_sample": true,
+        "max_new_tokens": 1024,
+        "min_p": 0.0,
+        "repetition_penalty": 1.0,
+        "temperature": 0.6,
+        "top_k": 20,
+        "top_p": 0.95
+      },
+      "official_recommended": {
+        "no_think": {
+          "do_sample": true,
+          "max_new_tokens": 1024,
+          "min_p": 0.0,
+          "repetition_penalty": 1.0,
+          "temperature": 0.7,
+          "top_k": 20,
+          "top_p": 0.8
+        },
+        "think": {
+          "do_sample": true,
+          "max_new_tokens": 1024,
+          "max_thinking_tokens": 512,
+          "min_p": 0.0,
+          "repetition_penalty": 1.0,
+          "temperature": 0.6,
+          "top_k": 20,
+          "top_p": 0.95
+        }
+      }
+    },
+    "seed": 1234,
+    "split": "test",
+    "supported_model_ids": [
+      "Qwen/Qwen3-1.7B",
+      "Qwen/Qwen3-4B",
+      "Qwen/Qwen3-8B",
+      "Qwen/Qwen3-14B"
+    ]
+  },
+  "device": "cuda",
+  "dtype": "float16",
+  "experiment": "exp_c",
+  "git_commit": "2818fa7f9d5ee8132120b696fc976bb5542118d6",
+  "model_id": "Qwen/Qwen3-14B",
+  "sample_counts": {
+    "batch_size": 16,
+    "conditions": 400,
+    "excluded_examples": 0,
+    "filtered_examples": 200,
+    "n_samples": 200,
+    "unfiltered_examples": 200
+  },
+  "seed": 1234,
+  "selected_layers": [
+    6,
+    13,
+    20
+  ],
+  "timestamp": "2026-04-27T05:04:14.858937+00:00"
+}

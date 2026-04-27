@@ -41,7 +41,7 @@ Experiment B now runs the prompt-structure control in no-thinking mode:
 
 ```bash
 python scripts/run_exp_b.py
-python scripts/run_exp_b.py --n-samples 100 --k 10 --layers 6 13 20 --sampling-profile official_recommended --batch-size 4
+python scripts/run_exp_b.py --n-samples 100 --k 10 --layers 6 13 20 --sampling-profile official_recommended --batch-size 8
 ```
 
 Experiment C now runs the canonical think vs no-think comparison:
