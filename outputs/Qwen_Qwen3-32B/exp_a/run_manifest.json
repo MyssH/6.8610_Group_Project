@@ -1,0 +1,79 @@
+{
+  "config": {
+    "batch_size": 16,
+    "dataset_config": "main",
+    "dataset_name": "openai/gsm8k",
+    "default_split": "test",
+    "experiment": "exp_a",
+    "k": 10,
+    "layers": [
+      6,
+      13,
+      20
+    ],
+    "max_thinking_tokens": 512,
+    "mode": "no_think",
+    "model_id": "Qwen/Qwen3-32B",
+    "n_baseline": 30,
+    "normalize_hidden_states": false,
+    "output_dir": "/content/NLP_Final/outputs/Qwen--Qwen3-32B/exp_a",
+    "sampling_profile": "official_recommended",
+    "sampling_profiles": {
+      "matched_main": {
+        "do_sample": true,
+        "max_new_tokens": 1024,
+        "min_p": 0.0,
+        "repetition_penalty": 1.0,
+        "temperature": 0.6,
+        "top_k": 20,
+        "top_p": 0.95
+      },
+      "official_recommended": {
+        "no_think": {
+          "do_sample": true,
+          "max_new_tokens": 1024,
+          "min_p": 0.0,
+          "repetition_penalty": 1.0,
+          "temperature": 0.7,
+          "top_k": 20,
+          "top_p": 0.8
+        },
+        "think": {
+          "do_sample": true,
+          "max_new_tokens": 1024,
+          "max_thinking_tokens": 512,
+          "min_p": 0.0,
+          "repetition_penalty": 1.0,
+          "temperature": 0.6,
+          "top_k": 20,
+          "top_p": 0.95
+        }
+      }
+    },
+    "seed": 1234,
+    "split": "test",
+    "supported_model_ids": [
+      "Qwen/Qwen3-1.7B",
+      "Qwen/Qwen3-4B",
+      "Qwen/Qwen3-8B",
+      "Qwen/Qwen3-14B"
+    ]
+  },
+  "device": "cuda",
+  "dtype": "float16",
+  "experiment": "exp_a",
+  "git_commit": "77c3b02c4f8e81abc980f5aa0eed42f1699345dc",
+  "model_id": "Qwen/Qwen3-32B",
+  "sample_counts": {
+    "batch_size": 16,
+    "cases": 45,
+    "n_baseline": 30
+  },
+  "seed": 1234,
+  "selected_layers": [
+    6,
+    13,
+    20
+  ],
+  "timestamp": "2026-04-27T05:47:57.761337+00:00"
+}

@@ -1,0 +1,4 @@
+summary_type,prompt_variant,mode,accuracy,mean_answer_tokens,n
+accuracy,canonical,no_think,0.51,53.39,100
+accuracy,irrelevant_context,no_think,0.48,54.16,100
+accuracy,repetitive_filler,no_think,0.52,52.53,100
