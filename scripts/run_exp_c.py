@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=None, help="Random seed.")
     parser.add_argument("--output-dir", default=None, help="Experiment output directory.")
     parser.add_argument("--model-id", default=None, help="Hugging Face model id.")
+    parser.add_argument("--batch-size", type=int, default=None, help="Number of prompts to generate in parallel.")
     parser.add_argument("--normalize-hidden-states", action="store_true", help="Use L2-normalized hidden states for LID.")
     parser.add_argument("--max-new-tokens", type=int, default=None, help="Override max generated tokens.")
     parser.add_argument("--no-resume", action="store_true", help="Regenerate records even when saved outputs exist.")
@@ -46,6 +47,8 @@ def main() -> None:
         config["output_dir"] = args.output_dir
     if args.model_id is not None:
         config["model_id"] = args.model_id
+    if args.batch_size is not None:
+        config["batch_size"] = args.batch_size
     if args.normalize_hidden_states:
         config["normalize_hidden_states"] = True
     if args.max_new_tokens is not None:

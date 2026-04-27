@@ -8,6 +8,7 @@ from tqdm import tqdm
 from qwen_lid.answer_parsing import evaluate_correctness
 from qwen_lid.config import get_sampling_config
 from qwen_lid.experiments.common import (
+    batched,
     compute_lid_metric_rows,
     existing_records_by_condition,
     finalize_raw_jsonl,
@@ -145,6 +146,7 @@ def run_exp_c(config: dict[str, Any], n_samples: int | None = None, resume: bool
     k = int(config.get("k", 10))
     layers = [int(layer) for layer in config.get("layers", [6, 13, 20])]
     normalize = bool(config.get("normalize_hidden_states", False))
+    batch_size = int(config.get("batch_size", config.get("generation_batch_size", 1)))
     n_samples = int(config.get("n_samples", 200) if n_samples is None else n_samples)
     output_paths = prepare_experiment_dirs(config.get("output_dir", "outputs/exp_c"))
     raw_path = output_paths["root"] / "raw_generations.jsonl"
@@ -160,44 +162,60 @@ def run_exp_c(config: dict[str, Any], n_samples: int | None = None, resume: bool
     wrapper = load_model(config.get("model_id", "Qwen/Qwen3-1.7B"))
     modes = ["think", "no_think"]
     target_condition_ids: list[str] = []
-    for example in tqdm(examples, desc="Experiment C examples"):
+    pending_by_mode: dict[str, list[dict[str, Any]]] = {mode: [] for mode in modes}
+    for example in examples:
         user_content = build_gsm8k_canonical_prompt(example.question)
         for mode in modes:
             condition_id = f"exp_c__{example.example_id}__{mode}"
             target_condition_ids.append(condition_id)
             if resume and condition_id in records_by_condition and hidden_file_exists(records_by_condition[condition_id]):
                 continue
-            sampling = get_sampling_config(config, config.get("sampling_profile", "official_recommended"), mode)
-            result = wrapper.generate_with_hidden_states(
-                user_content=user_content,
+            pending_by_mode[mode].append(
+                {
+                    "example": example,
+                    "mode": mode,
+                    "condition_id": condition_id,
+                    "user_content": user_content,
+                }
+            )
+
+    for mode in modes:
+        sampling = get_sampling_config(config, config.get("sampling_profile", "official_recommended"), mode)
+        for task_batch in tqdm(batched(pending_by_mode[mode], batch_size), desc=f"Experiment C {mode} batches"):
+            results = wrapper.generate_batch_with_hidden_states(
+                user_contents=[task["user_content"] for task in task_batch],
                 enable_thinking=(mode == "think"),
                 selected_layers=layers,
                 sampling_config=sampling,
             )
-            segments = segment_generation(
-                result.decoded_text,
-                result.decoded_prefixes,
-                mode,
-                generated_token_ids=result.generated_token_ids,
-                tokenizer=wrapper.tokenizer,
-            )
-            correctness = evaluate_correctness(example.gold_answer, segments["answer_segment"].text)
-            hidden_path = output_paths["hidden"] / f"{condition_id}.npz"
-            record = record_generation(
-                result,
-                experiment="exp_c",
-                condition_id=condition_id,
-                example_id=example.example_id,
-                mode=mode,
-                prompt_variant="canonical",
-                user_content=user_content,
-                segments=segments,
-                hidden_path=hidden_path,
-                raw_path=raw_path,
-                correctness=correctness,
-                metadata={"source_index": example.source_index},
-            )
-            records_by_condition[condition_id] = record
+            for task, result in zip(task_batch, results):
+                example = task["example"]
+                condition_id = task["condition_id"]
+                user_content = task["user_content"]
+                segments = segment_generation(
+                    result.decoded_text,
+                    result.decoded_prefixes,
+                    mode,
+                    generated_token_ids=result.generated_token_ids,
+                    tokenizer=wrapper.tokenizer,
+                )
+                correctness = evaluate_correctness(example.gold_answer, segments["answer_segment"].text)
+                hidden_path = output_paths["hidden"] / f"{condition_id}.npz"
+                record = record_generation(
+                    result,
+                    experiment="exp_c",
+                    condition_id=condition_id,
+                    example_id=example.example_id,
+                    mode=mode,
+                    prompt_variant="canonical",
+                    user_content=user_content,
+                    segments=segments,
+                    hidden_path=hidden_path,
+                    raw_path=raw_path,
+                    correctness=correctness,
+                    metadata={"source_index": example.source_index},
+                )
+                records_by_condition[condition_id] = record
 
     current_records_by_condition = {
         condition_id: records_by_condition[condition_id]
@@ -206,7 +224,7 @@ def run_exp_c(config: dict[str, Any], n_samples: int | None = None, resume: bool
     }
     finalize_raw_jsonl(raw_path, current_records_by_condition)
     records = list(current_records_by_condition.values())
-    unfiltered_sample_rows = compute_lid_metric_rows(records, k=k, normalize=normalize)
+    unfiltered_sample_rows = compute_lid_metric_rows(records, k=k, normalize=normalize, lid_device=wrapper.device_info.device)
     sample_rows, filter_report_rows = _filter_by_valid_thinking_segment(unfiltered_sample_rows, layers)
     pairs = _pair_rows(sample_rows)
     summaries = _summary_rows(sample_rows, pairs, seed=int(config.get("seed", 1234)))
@@ -223,6 +241,7 @@ def run_exp_c(config: dict[str, Any], n_samples: int | None = None, resume: bool
         sample_counts={
             "n_samples": n_samples,
             "conditions": len(records),
+            "batch_size": batch_size,
             "unfiltered_examples": len({row["example_id"] for row in unfiltered_sample_rows}),
             "filtered_examples": len({row["example_id"] for row in sample_rows}),
             "excluded_examples": len([row for row in filter_report_rows if not row["keep"]]),

@@ -32,3 +32,12 @@ def test_duplicate_rows_do_not_crash() -> None:
     result = compute_token_lid_with_mask(hidden, k=5)
     assert result.values.shape == (13,)
     assert result.valid_mask.dtype == bool
+
+
+def test_torch_lid_path_matches_shape() -> None:
+    rng = np.random.default_rng(456)
+    hidden = rng.normal(size=(18, 5)).astype(np.float32)
+    result = compute_token_lid_with_mask(hidden, k=5, device="cpu")
+    assert result.values.shape == (18,)
+    assert result.valid_mask.shape == (18,)
+    assert np.isfinite(result.values).any()

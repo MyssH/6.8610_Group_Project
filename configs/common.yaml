@@ -10,6 +10,7 @@ default_split: test
 seed: 1234
 k: 10
 layers: [6, 13, 20]
+batch_size: 4
 normalize_hidden_states: false
 sampling_profile: official_recommended
 max_thinking_tokens: 512

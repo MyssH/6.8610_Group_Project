@@ -34,26 +34,27 @@ Experiment A:
 
 ```bash
 python scripts/run_exp_a.py
-python scripts/run_exp_a.py --n-baseline 30 --k 10 --layers 6 13 20
+python scripts/run_exp_a.py --n-baseline 30 --k 10 --layers 6 13 20 --batch-size 4
 ```
 
 Experiment B now runs the prompt-structure control in no-thinking mode:
 
 ```bash
 python scripts/run_exp_b.py
-python scripts/run_exp_b.py --n-samples 100 --k 10 --layers 6 13 20 --sampling-profile official_recommended
+python scripts/run_exp_b.py --n-samples 100 --k 10 --layers 6 13 20 --sampling-profile official_recommended --batch-size 4
 ```
 
 Experiment C now runs the canonical think vs no-think comparison:
 
 ```bash
 python scripts/run_exp_c.py
-python scripts/run_exp_c.py --n-samples 200 --k 10 --layers 6 13 20 --sampling-profile official_recommended
+python scripts/run_exp_c.py --n-samples 200 --k 10 --layers 6 13 20 --sampling-profile official_recommended --batch-size 4
 ```
 
 Each runner resumes from saved JSONL and NPZ artifacts unless `--no-resume` is passed.
 Use `--max-new-tokens` for short smoke runs.
 Use `--model-id` on any experiment runner to switch among supported Qwen3 models.
+Use `--batch-size` to run prompts in parallel. Batched generation uses padded prompts with attention masks, and hidden-state artifacts only store real generated tokens, not prompt padding or finished-sample padding.
 
 ## Outputs
 
@@ -90,7 +91,7 @@ The default sampling profile follows Qwen's recommended parameters: thinking use
 The default total generation budget is `1024` tokens. Thinking-mode generation may emit `</think>` at any time, but the loop forces `</think>` once the thinking segment reaches `512` tokens.
 Thinking segmentation uses Qwen's generated-token boundary for the final `</think>` token id, then falls back to text parsing only when token-level data is unavailable.
 Experiment C metrics and plots filter out paired examples when the think-mode `thinking_segment` is too short to produce valid LID on every selected layer; both the think and no-think rows are excluded from the main analysis for those examples.
-The main LID path uses float32 Euclidean distances with no hidden-state normalization; `--normalize-hidden-states` enables the optional sensitivity path.
+The main LID path uses float32 Euclidean distances with no hidden-state normalization; `--normalize-hidden-states` enables the optional sensitivity path. Metrics use Torch for LID and run on CUDA or MPS when available, falling back to CPU only when needed.
 
 ## Colab
 

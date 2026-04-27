@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 from qwen_lid.config import get_sampling_config
 from qwen_lid.experiments.common import (
+    batched,
     compute_lid_metric_rows,
     existing_records_by_condition,
     finalize_raw_jsonl,
@@ -75,6 +76,7 @@ def run_exp_a(config: dict[str, Any], n_baseline: int | None = None, resume: boo
     k = int(config.get("k", 10))
     layers = [int(layer) for layer in config.get("layers", [6, 13, 20])]
     normalize = bool(config.get("normalize_hidden_states", False))
+    batch_size = int(config.get("batch_size", config.get("generation_batch_size", 1)))
     n_baseline = int(config.get("n_baseline", 30) if n_baseline is None else n_baseline)
     output_paths = prepare_experiment_dirs(config.get("output_dir", "outputs/exp_a"))
     raw_path = output_paths["root"] / "raw_generations.jsonl"
@@ -85,42 +87,48 @@ def run_exp_a(config: dict[str, Any], n_baseline: int | None = None, resume: boo
     sampling = get_sampling_config(config, config.get("sampling_profile", "official_recommended"), "no_think")
     target_condition_ids: list[str] = []
 
-    for case in tqdm(cases, desc="Experiment A"):
+    pending_cases: list[PromptCase] = []
+    for case in cases:
         condition_id = f"exp_a__{case.case_id}"
         target_condition_ids.append(condition_id)
         if resume and condition_id in records_by_condition and hidden_file_exists(records_by_condition[condition_id]):
             continue
-        result = wrapper.generate_with_hidden_states(
-            user_content=case.user_content,
+        pending_cases.append(case)
+
+    for case_batch in tqdm(batched(pending_cases, batch_size), desc="Experiment A batches"):
+        results = wrapper.generate_batch_with_hidden_states(
+            user_contents=[case.user_content for case in case_batch],
             enable_thinking=False,
             selected_layers=layers,
             sampling_config=sampling,
         )
-        segments = {
-            "full_output": SegmentInfo(
-                name="full_output",
-                text=result.decoded_text,
-                token_start=0,
-                token_end=len(result.generated_token_ids),
-                parse_status="ok",
+        for case, result in zip(case_batch, results):
+            condition_id = f"exp_a__{case.case_id}"
+            segments = {
+                "full_output": SegmentInfo(
+                    name="full_output",
+                    text=result.decoded_text,
+                    token_start=0,
+                    token_end=len(result.generated_token_ids),
+                    parse_status="ok",
+                )
+            }
+            hidden_path = output_paths["hidden"] / f"{condition_id}.npz"
+            record = record_generation(
+                result,
+                experiment="exp_a",
+                condition_id=condition_id,
+                example_id=case.metadata.get("example_id", case.case_id),
+                mode="no_think",
+                prompt_variant="degenerate" if case.family != "regular_gsm8k_nothink" else "canonical",
+                family=case.family,
+                user_content=case.user_content,
+                segments=segments,
+                hidden_path=hidden_path,
+                raw_path=raw_path,
+                metadata=case.metadata,
             )
-        }
-        hidden_path = output_paths["hidden"] / f"{condition_id}.npz"
-        record = record_generation(
-            result,
-            experiment="exp_a",
-            condition_id=condition_id,
-            example_id=case.metadata.get("example_id", case.case_id),
-            mode="no_think",
-            prompt_variant="degenerate" if case.family != "regular_gsm8k_nothink" else "canonical",
-            family=case.family,
-            user_content=case.user_content,
-            segments=segments,
-            hidden_path=hidden_path,
-            raw_path=raw_path,
-            metadata=case.metadata,
-        )
-        records_by_condition[condition_id] = record
+            records_by_condition[condition_id] = record
 
     current_records_by_condition = {
         condition_id: records_by_condition[condition_id]
@@ -129,7 +137,7 @@ def run_exp_a(config: dict[str, Any], n_baseline: int | None = None, resume: boo
     }
     finalize_raw_jsonl(raw_path, current_records_by_condition)
     records = list(current_records_by_condition.values())
-    sample_rows = compute_lid_metric_rows(records, k=k, normalize=normalize)
+    sample_rows = compute_lid_metric_rows(records, k=k, normalize=normalize, lid_device=wrapper.device_info.device)
     summary_rows = _summary_rows(sample_rows, seed=int(config.get("seed", 1234)))
     write_metrics(output_paths["root"], sample_rows, [], summary_rows)
     write_manifest(
@@ -137,6 +145,6 @@ def run_exp_a(config: dict[str, Any], n_baseline: int | None = None, resume: boo
         experiment="exp_a",
         config=config,
         model_metadata={"device": str(wrapper.device_info.device), "dtype": wrapper.device_info.dtype_name},
-        sample_counts={"cases": len(cases), "n_baseline": n_baseline},
+        sample_counts={"cases": len(cases), "n_baseline": n_baseline, "batch_size": batch_size},
     )
     plot_exp_a(output_paths["root"])

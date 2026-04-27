@@ -178,52 +178,105 @@ def sample_next_token(
     return int(torch.multinomial(probabilities, num_samples=1).item())
 
 
-def autoregressive_generate(
+def _model_input_device(model: torch.nn.Module, fallback: torch.device) -> torch.device:
+    try:
+        return next(model.parameters()).device
+    except StopIteration:
+        return fallback
+
+
+def _gather_last_prompt_logits(logits: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+    positions = torch.arange(attention_mask.shape[1], device=attention_mask.device).unsqueeze(0)
+    last_indices = torch.where(attention_mask.bool(), positions, torch.zeros_like(positions)).max(dim=1).values
+    batch_indices = torch.arange(logits.shape[0], device=logits.device)
+    return logits[batch_indices, last_indices, :]
+
+
+def autoregressive_generate_batch(
     model: torch.nn.Module,
     tokenizer: Any,
-    prompt_text: str,
+    prompt_texts: list[str],
     selected_layers: list[int],
     sampling_config: dict[str, Any],
     device: torch.device,
     dtype_name: str,
     enable_thinking: bool = False,
-) -> GenerationResult:
-    """Generate tokens one step at a time and store selected-layer states."""
-    encoded = tokenizer(prompt_text, return_tensors="pt")
-    input_ids = encoded["input_ids"].to(device)
-    prompt_token_ids = [int(token_id) for token_id in input_ids[0].detach().cpu().tolist()]
+) -> list[GenerationResult]:
+    """Batched autoregressive generation with per-sample hidden-state alignment."""
+    if not prompt_texts:
+        return []
+    old_padding_side = getattr(tokenizer, "padding_side", "right")
+    tokenizer.padding_side = "left"
+    try:
+        encoded = tokenizer(prompt_texts, return_tensors="pt", padding=True)
+    finally:
+        tokenizer.padding_side = old_padding_side
+
+    input_device = _model_input_device(model, device)
+    input_ids = encoded["input_ids"].to(input_device)
+    attention_mask = encoded["attention_mask"].to(input_device)
+    batch_size = input_ids.shape[0]
+    prompt_token_ids = [
+        [int(token_id) for token_id, keep in zip(input_ids[row].detach().cpu().tolist(), attention_mask[row].detach().cpu().tolist()) if keep]
+        for row in range(batch_size)
+    ]
     eos_ids = _as_eos_set(tokenizer)
     max_new_tokens = int(sampling_config.get("max_new_tokens", 256))
     hidden_size = int(getattr(model.config, "hidden_size", 0))
 
-    hidden_by_layer: dict[int, list[np.ndarray]] = {layer: [] for layer in selected_layers}
-    generated_ids: list[int] = []
-    decoded_prefixes: list[str] = []
-    stop_reason = "max_new_tokens"
+    hidden_by_sample: list[dict[int, list[torch.Tensor]]] = [
+        {layer: [] for layer in selected_layers} for _ in range(batch_size)
+    ]
+    generated_ids: list[list[int]] = [[] for _ in range(batch_size)]
+    finished = [False for _ in range(batch_size)]
+    stop_reasons = ["max_new_tokens" for _ in range(batch_size)]
+    if tokenizer.pad_token_id is not None:
+        pad_token_id = int(tokenizer.pad_token_id)
+    else:
+        eos_token_id = tokenizer.eos_token_id
+        if isinstance(eos_token_id, list):
+            pad_token_id = int(eos_token_id[0]) if eos_token_id else 0
+        else:
+            pad_token_id = int(eos_token_id or 0)
 
     with torch.inference_mode():
-        outputs = model(input_ids=input_ids, use_cache=True, return_dict=True)
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask, use_cache=True, return_dict=True)
         past_key_values = outputs.past_key_values
-        next_logits = outputs.logits[:, -1, :].squeeze(0)
+        next_logits = _gather_last_prompt_logits(outputs.logits, attention_mask)
 
         for _ in range(max_new_tokens):
-            forced_token_id = thinking_token_control(
-                generated_ids,
-                sampling_config,
-                tokenizer,
-                enable_thinking=enable_thinking,
-            )
-            token_id = sample_next_token(
-                next_logits,
-                generated_ids,
-                sampling_config,
-                forced_token_id=forced_token_id,
-            )
-            generated_ids.append(token_id)
+            active_before_step = [not done for done in finished]
+            if not any(active_before_step):
+                break
 
-            next_input = torch.tensor([[token_id]], dtype=torch.long, device=device)
+            next_token_ids: list[int] = []
+            for row in range(batch_size):
+                if finished[row]:
+                    next_token_ids.append(pad_token_id)
+                    continue
+                forced_token_id = thinking_token_control(
+                    generated_ids[row],
+                    sampling_config,
+                    tokenizer,
+                    enable_thinking=enable_thinking,
+                )
+                token_id = sample_next_token(
+                    next_logits[row],
+                    generated_ids[row],
+                    sampling_config,
+                    forced_token_id=forced_token_id,
+                )
+                next_token_ids.append(token_id)
+                generated_ids[row].append(token_id)
+
+            next_input = torch.tensor(next_token_ids, dtype=torch.long, device=input_device).unsqueeze(1)
+            attention_mask = torch.cat(
+                [attention_mask, torch.ones((batch_size, 1), dtype=attention_mask.dtype, device=input_device)],
+                dim=1,
+            )
             outputs = model(
                 input_ids=next_input,
+                attention_mask=attention_mask,
                 past_key_values=past_key_values,
                 use_cache=True,
                 output_hidden_states=True,
@@ -237,40 +290,72 @@ def autoregressive_generate(
                     raise ValueError(
                         f"Layer {layer} is out of range for model with {len(hidden_states) - 1} blocks"
                     )
-                vector = hidden_states[layer_index][0, -1, :].detach().float().cpu().numpy()
-                hidden_by_layer[layer].append(vector)
+                layer_values = hidden_states[layer_index][:, -1, :].detach()
+                for row, was_active in enumerate(active_before_step):
+                    if was_active:
+                        hidden_by_sample[row][layer].append(layer_values[row])
 
-            decoded_prefixes.append(
-                tokenizer.decode(generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+            next_logits = outputs.logits[:, -1, :]
+            for row, was_active in enumerate(active_before_step):
+                if was_active and next_token_ids[row] in eos_ids:
+                    finished[row] = True
+                    stop_reasons[row] = "eos"
+
+    results: list[GenerationResult] = []
+    for row in range(batch_size):
+        arrays: dict[int, np.ndarray] = {}
+        for layer, vectors in hidden_by_sample[row].items():
+            if vectors:
+                arrays[layer] = torch.stack(vectors).float().cpu().numpy().astype(np.float32, copy=False)
+            else:
+                arrays[layer] = np.zeros((0, hidden_size), dtype=np.float32)
+        decoded_text = tokenizer.decode(
+            generated_ids[row],
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        metadata = {
+            "decoding_config": dict(sampling_config),
+            "stop_reason": stop_reasons[row],
+            "generated_token_count": len(generated_ids[row]),
+            "selected_layers": selected_layers,
+            "device": str(device),
+            "dtype": dtype_name,
+            "enable_thinking": bool(enable_thinking),
+            "batch_size": batch_size,
+        }
+        results.append(
+            GenerationResult(
+                prompt_text=prompt_texts[row],
+                prompt_token_ids=prompt_token_ids[row],
+                generated_token_ids=generated_ids[row],
+                decoded_text=decoded_text,
+                decoded_prefixes=[],
+                hidden_states=arrays,
+                metadata=metadata,
             )
-            next_logits = outputs.logits[:, -1, :].squeeze(0)
-            if token_id in eos_ids:
-                stop_reason = "eos"
-                break
+        )
+    return results
 
-    arrays: dict[int, np.ndarray] = {}
-    for layer, vectors in hidden_by_layer.items():
-        if vectors:
-            arrays[layer] = np.stack(vectors).astype(np.float32, copy=False)
-        else:
-            arrays[layer] = np.zeros((0, hidden_size), dtype=np.float32)
 
-    decoded_text = decoded_prefixes[-1] if decoded_prefixes else ""
-    metadata = {
-        "decoding_config": dict(sampling_config),
-        "stop_reason": stop_reason,
-        "generated_token_count": len(generated_ids),
-        "selected_layers": selected_layers,
-        "device": str(device),
-        "dtype": dtype_name,
-        "enable_thinking": bool(enable_thinking),
-    }
-    return GenerationResult(
-        prompt_text=prompt_text,
-        prompt_token_ids=prompt_token_ids,
-        generated_token_ids=generated_ids,
-        decoded_text=decoded_text,
-        decoded_prefixes=decoded_prefixes,
-        hidden_states=arrays,
-        metadata=metadata,
-    )
+def autoregressive_generate(
+    model: torch.nn.Module,
+    tokenizer: Any,
+    prompt_text: str,
+    selected_layers: list[int],
+    sampling_config: dict[str, Any],
+    device: torch.device,
+    dtype_name: str,
+    enable_thinking: bool = False,
+) -> GenerationResult:
+    """Generate one sample via the batched implementation."""
+    return autoregressive_generate_batch(
+        model=model,
+        tokenizer=tokenizer,
+        prompt_texts=[prompt_text],
+        selected_layers=selected_layers,
+        sampling_config=sampling_config,
+        device=device,
+        dtype_name=dtype_name,
+        enable_thinking=enable_thinking,
+    )[0]

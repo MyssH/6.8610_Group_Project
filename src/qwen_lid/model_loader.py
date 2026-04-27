@@ -7,7 +7,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from qwen_lid.device import DeviceInfo, choose_device
-from qwen_lid.generation import autoregressive_generate
+from qwen_lid.generation import autoregressive_generate, autoregressive_generate_batch
 from qwen_lid.paths import resolve_model_source
 from qwen_lid.schemas import GenerationResult
 
@@ -48,6 +48,25 @@ class QwenModelWrapper:
             model=self.model,
             tokenizer=self.tokenizer,
             prompt_text=prompt_text,
+            selected_layers=selected_layers,
+            sampling_config=sampling_config,
+            device=self.device_info.device,
+            dtype_name=self.device_info.dtype_name,
+            enable_thinking=enable_thinking,
+        )
+
+    def generate_batch_with_hidden_states(
+        self,
+        user_contents: list[str],
+        enable_thinking: bool,
+        selected_layers: list[int],
+        sampling_config: dict[str, Any],
+    ) -> list[GenerationResult]:
+        prompt_texts = [self.build_chat_prompt(user_content, enable_thinking) for user_content in user_contents]
+        return autoregressive_generate_batch(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            prompt_texts=prompt_texts,
             selected_layers=selected_layers,
             sampling_config=sampling_config,
             device=self.device_info.device,

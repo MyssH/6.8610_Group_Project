@@ -4,11 +4,28 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import torch
 
 from qwen_lid.hidden_states import load_hidden_states, save_hidden_states
 from qwen_lid.io_utils import append_jsonl, ensure_dir, get_git_commit, read_jsonl, save_json, utc_timestamp, write_jsonl
 from qwen_lid.lid import compute_token_lid_with_mask
 from qwen_lid.schemas import GenerationResult, SegmentInfo
+
+
+def choose_lid_device(preferred: str | torch.device | None = None) -> torch.device:
+    if preferred is not None:
+        device = torch.device(preferred)
+        if device.type == "cuda" and torch.cuda.is_available():
+            return device
+        if device.type == "mps" and torch.backends.mps.is_available():
+            return device
+        if device.type == "cpu":
+            return device
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
 def prepare_experiment_dirs(output_dir: str | Path) -> dict[str, Path]:
@@ -19,6 +36,11 @@ def prepare_experiment_dirs(output_dir: str | Path) -> dict[str, Path]:
         "figures": ensure_dir(root / "figures"),
     }
     return paths
+
+
+def batched(items: list[Any], batch_size: int) -> list[list[Any]]:
+    size = max(1, int(batch_size))
+    return [items[index : index + size] for index in range(0, len(items), size)]
 
 
 def existing_records_by_condition(raw_path: str | Path) -> dict[str, dict[str, Any]]:
@@ -79,20 +101,26 @@ def compute_lid_metric_rows(
     *,
     k: int,
     normalize: bool,
+    lid_device: str | torch.device | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    device = choose_lid_device(lid_device)
     for record in records:
         hidden_path = record.get("hidden_state_path")
         if not hidden_path or not Path(hidden_path).exists():
             continue
         hidden_states = load_hidden_states(hidden_path)
+        hidden_tensors = {
+            layer: torch.as_tensor(values, dtype=torch.float32, device=device)
+            for layer, values in hidden_states.items()
+        }
         correctness = record.get("correctness", {})
         for segment_name, segment in record.get("segments", {}).items():
             token_start = int(segment["token_start"])
             token_end = int(segment["token_end"])
-            for layer, layer_hidden in hidden_states.items():
+            for layer, layer_hidden in hidden_tensors.items():
                 segment_hidden = layer_hidden[token_start:token_end]
-                lid_result = compute_token_lid_with_mask(segment_hidden, k=k, normalize=normalize)
+                lid_result = compute_token_lid_with_mask(segment_hidden, k=k, normalize=normalize, device=device)
                 valid = bool(lid_result.valid_mask.any())
                 mean_lid = float(lid_result.values[lid_result.valid_mask].mean()) if valid else None
                 rows.append(
