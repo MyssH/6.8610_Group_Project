@@ -38,3 +38,4 @@ outputs/*/*/raw_generations.jsonl
 
 # Local scratch
 CODEX_QWEN3_LID_EXPERIMENTS.md
+.claude/
