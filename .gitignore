@@ -17,6 +17,9 @@ __pycache__/
 .venv/
 venv/
 
+# Claude
+.claude/
+
 # LaTeX build artifacts
 report/main.aux
 report/main.bbl
