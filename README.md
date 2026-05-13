@@ -6,7 +6,7 @@
 > reliably higher than that of *wrong* ones — at every scale we tested.
 
 <p align="center">
-  <img src="report/Images/Allmodel_expC_auc_correctness_layer13.png" width="78%" alt="Across Qwen3 scales, correct thinking trajectories have higher LID than incorrect ones, and the correctness gap is largest in the thinking phase.">
+  <img src="report/Images/fig_exp_c_correctness_layer13.png" width="78%" alt="Across Qwen3 scales, correct thinking trajectories have higher LID than incorrect ones, and the correctness gap is largest in the thinking phase.">
 </p>
 
 ## TL;DR
@@ -155,17 +155,3 @@ construction, and think/no-think segmentation.
 - Exp. C filters out paired examples whose thinking segment is too short to
   produce a valid LID estimate on every selected layer; both the think and
   no-think rows are dropped from the main analysis for those examples.
-
-## Citation
-
-If you use this code or analysis, please cite:
-
-```bibtex
-@unpublished{huang2026lidthinking,
-  title  = {Local Intrinsic Dimensionality of Hidden-State Trajectories:
-            A Geometric Marker of Correct Reasoning in Qwen3},
-  author = {Huang, Kaiyuan and Shen, Gefei and Feng, Qiuyang},
-  year   = {2026},
-  note   = {Harvard / MIT; under review.}
-}
-```
