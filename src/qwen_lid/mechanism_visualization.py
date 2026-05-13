@@ -1258,14 +1258,30 @@ def build_exp_c_token_dataset(
         records = filtered_records(run, exp)
         by_key = {(str(record.get("example_id")), str(record.get("mode"))): record for record in records}
         kept_examples = sorted({example for example, mode in by_key if mode == "think" and (example, "no_think") in by_key})
-        if config.max_exp_c_token_examples and len(kept_examples) > config.max_exp_c_token_examples:
-            per_model_selected = set(rng.choice(kept_examples, size=config.max_exp_c_token_examples, replace=False).tolist())
+        wrong_examples = sorted(
+            example
+            for example in kept_examples
+            if correctness_value(by_key[(example, "think")]) is False
+        )
+        correct_examples = sorted(set(kept_examples) - set(wrong_examples))
+        cap = config.max_exp_c_token_examples
+        if cap and len(kept_examples) > cap:
+            keep_wrong = set(wrong_examples)
+            remaining = max(cap - len(keep_wrong), 0)
+            if remaining and len(correct_examples) > remaining:
+                keep_correct = set(
+                    rng.choice(correct_examples, size=remaining, replace=False).tolist()
+                )
+            else:
+                keep_correct = set(correct_examples)
+            per_model_selected = keep_wrong | keep_correct
         else:
             per_model_selected = set(kept_examples)
         selected = sorted(per_model_selected | aggregate_common_examples)
         print(
             f"{run.label} Exp C token-level segment sample: {len(selected)} examples "
-            f"({len(per_model_selected)} per-model, {len(aggregate_common_examples)} common-kept aggregate)"
+            f"({len(per_model_selected)} per-model [keeps all {len(wrong_examples)} wrong], "
+            f"{len(aggregate_common_examples)} common-kept aggregate)"
         )
         for example_id in selected:
             for mode, segment_names in {

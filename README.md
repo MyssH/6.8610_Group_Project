@@ -1,98 +1,171 @@
-# Qwen3 LID Experiment Suite
+# LID-of-Thought: A Geometric Marker of Correct Reasoning in Qwen3
 
-This repository runs local activation-space Local Intrinsic Dimensionality (LID) experiments for Qwen3 models.
-It supports degenerate generation controls, GSM8K think vs no-think comparisons, and GSM8K prompt-structure controls.
+> Local Intrinsic Dimensionality (LID) of hidden-state trajectories during
+> autoregressive generation, measured in Qwen3 models from **1.7B to 32B** on
+> GSM8K. The thinking-phase LID of *correct* reasoning trajectories is
+> reliably higher than that of *wrong* ones — at every scale we tested.
 
-## Setup On macOS
+<p align="center">
+  <img src="report/Images/Allmodel_expC_auc_correctness_layer13.png" width="78%" alt="Across Qwen3 scales, correct thinking trajectories have higher LID than incorrect ones, and the correctness gap is largest in the thinking phase.">
+</p>
 
-Use the provided conda environment, then install the package requirements:
+## TL;DR
+
+Two controls and one main experiment:
+
+- **(A) Validity.** LID cleanly separates degenerate repetitive generation
+  from ordinary GSM8K generation at every Qwen3 scale.
+- **(B) Robustness.** Padding the prompt with irrelevant context or with
+  *repetitive boilerplate* does not move the answer-segment LID. LID tracks
+  the task, not the prompt's surface form.
+- **(C) Reasoning signature.** Paired think vs. no-think comparison on
+  matched GSM8K problems yields two findings:
+  - **C.1.** The relative ordering of mean LID across the *thinking*,
+    *think-answer*, and *no-think-answer* segments **is not stable across
+    model scale** — paired Wilcoxon `thinking − answer` differences flip
+    sign between 8B and 14B.
+  - **C.2 (main).** Stratifying by final-answer correctness, the thinking
+    segment of correct trajectories has **higher** mean LID than the
+    thinking segment of wrong trajectories — **at every scale**, one-sided
+    Mann–Whitney `p ≤ 0.05`. The gap inside the thinking segment is several
+    times larger than the gap in either answer segment.
+
+We read LID along the thinking trajectory not as a fixed signature of the
+thinking *mode*, but as a geometric correlate of *successful* reasoning.
+
+The full write-up is in [`report/main.tex`](report/main.tex).
+
+## Repository layout
+
+```
+.
+├── README.md
+├── pyproject.toml          installable package (qwen-lid)
+├── requirements.txt
+├── configs/                YAML configs for the three experiments
+│   ├── common.yaml         models, layers, k, sampling profile
+│   ├── exp_a.yaml          degenerate-control parameters
+│   ├── exp_b.yaml          prompt-structure parameters
+│   └── exp_c.yaml          think vs. no-think parameters
+├── src/qwen_lid/           library code
+│   ├── lid.py              Levina–Bickel k-NN LID estimator (torch/numpy)
+│   ├── generation.py       custom autoregressive loop with KV cache
+│   ├── segmentation.py     thinking vs. answer span identification
+│   ├── prompts.py          GSM8K visible-answer template + Exp A/B variants
+│   ├── mechanism_visualization.py
+│   │                       multi-model trajectory plots and tables
+│   └── experiments/        per-experiment drivers (exp_a, exp_b, exp_c)
+├── scripts/                CLI entry points (see below)
+├── tests/                  pytest suite (LID, prompts, segmentation, …)
+├── notebooks/              Colab notebook for A100 runs
+├── outputs/                per-model CSV metrics + figures (large; see notes)
+└── report/                 ICML-style paper, bib, sty, and all figures
+    ├── main.tex
+    ├── reference.bib
+    └── Images/             every figure cited by the paper
+```
+
+## Setup
 
 ```bash
-conda activate ds311
+# Recommended: a fresh Python 3.11 environment
 pip install -r requirements.txt
+# (optional) editable install of the library
+pip install -e .
 ```
 
-The code prefers MPS on Apple Silicon, falls back to CUDA when available in other environments, and otherwise uses CPU.
-Model loading uses `float16` on MPS/CUDA and `float32` on CPU.
-Supported model ids are `Qwen/Qwen3-1.7B`, `Qwen/Qwen3-4B`, `Qwen/Qwen3-8B`, and `Qwen/Qwen3-14B`.
+Apple Silicon (MPS), CUDA, and CPU are all supported; `float16` is used on
+MPS/CUDA and `float32` on CPU. Supported model ids:
+`Qwen/Qwen3-1.7B`, `Qwen/Qwen3-4B`, `Qwen/Qwen3-8B`, `Qwen/Qwen3-14B`,
+`Qwen/Qwen3-32B`.
 
-## Bootstrap Assets
-
-Download the Qwen3 model snapshot and cache GSM8K under the project:
+## Quick start
 
 ```bash
-python scripts/bootstrap_assets.py
-python scripts/bootstrap_assets.py --model-id Qwen/Qwen3-1.7B --dataset-name openai/gsm8k
+# 1. cache GSM8K and a model checkpoint under data/
+python scripts/bootstrap_assets.py --model-id Qwen/Qwen3-1.7B
+
+# 2. run any of the three experiments (CLI flags override configs/*.yaml)
+python scripts/run_exp_a.py    # validity (degenerate controls)
+python scripts/run_exp_b.py    # robustness (prompt structure)
+python scripts/run_exp_c.py    # think vs. no-think (main)
+
+# 3. build the multi-model trajectory plots and cross-model tables
+python scripts/run_mechanism_visualizations.py
+
+# 4. paired Wilcoxon / Mann–Whitney tests reported in the paper
+python scripts/run_wilcoxon_tests.py
 ```
 
-The model is stored under `data/caches/models/` and GSM8K is saved to `data/raw/gsm8k/`.
-Later runs reuse those local paths when present.
+Each experiment runner resumes from previously saved JSONL/NPZ artifacts
+unless `--no-resume` is passed. Use `--max-new-tokens` for short smoke runs
+and `--model-id` to switch models. Plots can be regenerated from saved
+metrics with `python scripts/plot_all.py`.
 
-## Run Experiments
+## Reproducing the figures and tables in the paper
 
-Experiment A:
+The figures in `report/Images/` and the tables in `report/main.tex` come
+from the small set of CSV / PNG artifacts under `outputs/`. Concretely:
+
+| Paper element                          | Source |
+| -------------------------------------- | ------ |
+| Exp. A figures (Fig. 1, A-layer 6/20)  | `outputs/Qwen_Qwen3-*/exp_a/figures/` + `mechanism_visualizations/exp_a/` |
+| Exp. B figures (Fig. 2, B-layer 6/20)  | `outputs/Qwen_Qwen3-*/exp_b/figures/` + `mechanism_visualizations/exp_b/` |
+| Exp. C, C.1 segment plots              | `outputs/Qwen_Qwen3-1.7B/exp_c/figures/` + `mechanism_visualizations/exp_c/trajectory_statistics/` |
+| Exp. C, C.2 correctness plots          | `outputs/Qwen_Qwen3-*/exp_c/figures_mechanism/correctness_stratified/` |
+| Table 1 (C.1 Wilcoxon)                 | `outputs/mechanism_visualizations/data/wilcoxon_exp_c_c1.csv` |
+| Table 2 (C.2 Mann–Whitney)             | `outputs/mechanism_visualizations/data/wilcoxon_exp_c_c2.csv` |
+
+The Wilcoxon CSVs are produced by `scripts/run_wilcoxon_tests.py` and are
+computed from each model's *full* `sample_metrics.csv` (no subsampling).
+
+## Building the paper
 
 ```bash
-python scripts/run_exp_a.py
-python scripts/run_exp_a.py --n-baseline 30 --k 10 --layers 6 13 20 --batch-size 4
+cd report
+pdflatex main && bibtex main && pdflatex main && pdflatex main
+# produces report/main.pdf  (gitignored)
 ```
 
-Experiment B now runs the prompt-structure control in no-thinking mode:
+`icml2026.sty`, `icml2026.bst`, and `reference.bib` are all included in
+`report/`.
+
+## Tests
 
 ```bash
-python scripts/run_exp_b.py
-python scripts/run_exp_b.py --n-samples 100 --k 10 --layers 6 13 20 --sampling-profile official_recommended --batch-size 8
+pytest -q
 ```
 
-Experiment C now runs the canonical think vs no-think comparison:
+The suite covers the LID estimator, GSM8K answer parsing, prompt
+construction, and think/no-think segmentation.
 
-```bash
-python scripts/run_exp_c.py
-python scripts/run_exp_c.py --n-samples 200 --k 10 --layers 6 13 20 --sampling-profile official_recommended --batch-size 4
+## Implementation notes
+
+- LID uses the Levina–Bickel k-NN maximum-likelihood estimator with `k=10`,
+  computed on raw Euclidean distances over `float32` hidden states (no
+  normalization). The `--normalize-hidden-states` flag enables an optional
+  unit-norm sensitivity path.
+- Generation is a custom autoregressive loop with a KV cache, sampling one
+  token at a time, storing only generated-token hidden states (no prompt /
+  padding rows). Sampling follows Qwen's recommended parameters: think
+  mode `T=0.6, top-p=0.95, top-k=20`, no-think `T=0.7, top-p=0.8, top-k=20`.
+- The thinking budget is capped at 512 tokens, total at 1024. Thinking
+  segments are bounded by Qwen's `</think>` token id (`151668`) when
+  available, with a text-level fallback.
+- Exp. C filters out paired examples whose thinking segment is too short to
+  produce a valid LID estimate on every selected layer; both the think and
+  no-think rows are dropped from the main analysis for those examples.
+
+## Citation
+
+If you use this code or analysis, please cite:
+
+```bibtex
+@unpublished{huang2026lidthinking,
+  title  = {Local Intrinsic Dimensionality of Hidden-State Trajectories:
+            A Geometric Marker of Correct Reasoning in Qwen3},
+  author = {Huang, Kaiyuan and Shen, Gefei and Feng, Qiuyang},
+  year   = {2026},
+  note   = {Harvard / MIT; under review.}
+}
 ```
-
-Each runner resumes from saved JSONL and NPZ artifacts unless `--no-resume` is passed.
-Use `--max-new-tokens` for short smoke runs.
-Use `--model-id` on any experiment runner to switch among supported Qwen3 models.
-Use `--batch-size` to run prompts in parallel. Batched generation uses padded prompts with attention masks, and hidden-state artifacts only store real generated tokens, not prompt padding or finished-sample padding.
-
-## Outputs
-
-Each experiment writes to its own output directory:
-
-- `outputs/exp_a/`
-- `outputs/exp_b/`
-- `outputs/exp_c/`
-
-Artifacts include:
-
-- `raw_generations.jsonl`
-- `hidden_states/*.npz`
-- `sample_metrics.csv`
-- `pair_metrics.csv`
-- `summary_metrics.csv`
-- `run_manifest.json`
-- `figures/*.png` and `figures/*.pdf`
-
-## Replot Only
-
-Regenerate plots from saved CSV artifacts without rerunning inference:
-
-```bash
-python scripts/plot_all.py
-```
-
-Overview copies are placed under `outputs/plots/`.
-
-## Implementation Notes
-
-Generation uses a custom autoregressive loop with KV cache. It samples one token at a time, stores generated token ids, and captures selected-layer hidden states aligned to generated tokens.
-The default sampling profile follows Qwen's recommended parameters: thinking uses temperature `0.6`, top-p `0.95`, top-k `20`, min-p `0`; non-thinking uses temperature `0.7`, top-p `0.8`, top-k `20`, min-p `0`.
-The default total generation budget is `1024` tokens. Thinking-mode generation may emit `</think>` at any time, but the loop forces `</think>` once the thinking segment reaches `512` tokens.
-Thinking segmentation uses Qwen's generated-token boundary for the final `</think>` token id, then falls back to text parsing only when token-level data is unavailable.
-Experiment C metrics and plots filter out paired examples when the think-mode `thinking_segment` is too short to produce valid LID on every selected layer; both the think and no-think rows are excluded from the main analysis for those examples.
-The main LID path uses float32 Euclidean distances with no hidden-state normalization; `--normalize-hidden-states` enables the optional sensitivity path. Metrics use Torch for LID and run on CUDA or MPS when available, falling back to CPU only when needed.
-
-## Colab
-
-Use [colab_qwen_lid_experiments.ipynb](/Users/myssh/Desktop/NLP_Final/notebooks/colab_qwen_lid_experiments.ipynb) on an A100 runtime to download GSM8K, download a selected Qwen3 model, run Experiments A/B/C with corrected names, and copy the full output folder to Google Drive.

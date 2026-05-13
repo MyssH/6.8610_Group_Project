@@ -1,14 +1,37 @@
+# Python bytecode / build
 __pycache__/
 *.py[cod]
+*.egg-info/
+
+# Test caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# OS / editors
 .DS_Store
+.idea/
+.vscode/
+
+# Virtual environments
 .venv/
 venv/
+
+# LaTeX build artifacts
+report/main.aux
+report/main.bbl
+report/main.blg
+report/main.log
+report/main.out
+report/main.toc
+report/main.pdf
+
+# Large or regenerable assets — keep code reproducible, leave heavy artifacts out of git
 data/raw/gsm8k/
 data/caches/models/
-outputs/*/hidden_states/
+outputs/*/*/hidden_states/
+outputs/*/*/raw_generations.jsonl
 *.npz
-*.egg-info/
+
+# Local scratch
 CODEX_QWEN3_LID_EXPERIMENTS.md
